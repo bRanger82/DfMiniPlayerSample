@@ -52,18 +52,35 @@ void publishError(byte ErrorCode)
   }
 }
 
-void publishMessage(byte wert)
+void publishMessage(byte MessageId)
 {  
   if (!BLE.connected())
   {
     Serial.println("PublishMessage - BLE not connected");
     return;
   }
+
+  if (!dfmp3.isOnline())
+  {
+    Serial.println("PublishError - DF MP3 Mini Player is not online!");
+    
+    mp3InfoServiceCharacteristic.writeValue(MessageId);
+    
+    dfMiniPlayerState.State.CurrentVolume = 0;
+    dfMiniPlayerState.State.CurrentTrack = 0;
+    dfMiniPlayerState.State.CurrentPlaybackMode = 0;
+    dfMiniPlayerState.State.CurrentStatus = 0;
+    dfMiniPlayerState.State.CurrentEQ = 0;
+    
+    DfMiniPlayerStateCharacteristic.writeValue( dfMiniPlayerState.bytes, sizeof dfMiniPlayerState.bytes );
+    
+    return;
+  }
   
   if (mp3InfoServiceCharacteristic.subscribed())
   {
     Serial.println("writeValue reached!");
-    mp3InfoServiceCharacteristic.writeValue(wert);
+    mp3InfoServiceCharacteristic.writeValue(MessageId);
   }
   
   if (DfMiniPlayerStateCharacteristic.subscribed())
@@ -362,11 +379,11 @@ void PlayPreviousTrack(void)
 
 void GetCurrentTrack(void)
 {
-    Serial.println(F("getCurrentTrack:"));
-    uint16_t currentTrack = dfmp3.getCurrentTrack();
-    Serial.println(currentTrack);
+  Serial.println(F("getCurrentTrack:"));
+  uint16_t currentTrack = dfmp3.getCurrentTrack();
+  Serial.println(currentTrack);
 
-    publishMessage(0x4C);
+  publishMessage(0x4C);
 }
 
 void SetNextEq(void)
@@ -459,6 +476,13 @@ void StartPlayback(void)
 
 void ProcessCommand(int CommandId)
 {
+  if (!dfmp3.isOnline())
+  {
+    Serial.println(F("DF Mini MP3 Player is NOT online!"));
+    publishMessage(0x00);
+    return;
+  }
+  
   switch(CommandId)
   {
     case MP3_CMD_PLAY_GLOBAL_TRACK:
