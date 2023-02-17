@@ -1,0 +1,549 @@
+#include <DFMiniMp3.h>
+#include <ArduinoBLE.h>
+
+
+BLEService mp3Service("{741B8C05-2908-40F8-BA78-B245AC40FF40}"); 
+
+
+#define DF_MINI_PLAYER_STATE_DATA_SIZE 7
+
+typedef struct __attribute__( ( packed ) )
+{
+  uint8_t CurrentVolume;
+  uint16_t CurrentTrack;
+  uint8_t CurrentPlaybackMode;
+  uint16_t CurrentStatus;
+  uint8_t CurrentEQ;
+} df_mini_player_state_t;
+
+typedef union
+{
+  df_mini_player_state_t State;
+  uint8_t bytes[ DF_MINI_PLAYER_STATE_DATA_SIZE ];
+} df_mini_player_state_ut;
+
+df_mini_player_state_ut dfMiniPlayerState;
+
+BLECharacteristic DfMiniPlayerStateCharacteristic( "{741B8C05-2908-40F8-BA78-B245AC40FF43}", BLERead | BLENotify, sizeof dfMiniPlayerState.bytes );
+
+BLEByteCharacteristic mp3CommandCharacteristic("{741B8C05-2908-40F8-BA78-B245AC40FF41}", BLEWrite);
+BLEByteCharacteristic mp3InfoServiceCharacteristic("{741B8C05-2908-40F8-BA78-B245AC40FF42}", BLERead | BLENotify);
+
+class Mp3Notify; 
+
+// Define a handy type using serial and our notify class
+typedef DFMiniMp3<HardwareSerial, Mp3Notify> DfMp3; 
+
+// Instance a DfMp3 object
+DfMp3 dfmp3(Serial1);
+
+void publishMessage(byte wert)
+{  
+  if (!BLE.connected())
+  {
+    Serial.println("PublishMessage - BLE not connected");
+    return;
+  }
+  
+  if (mp3InfoServiceCharacteristic.subscribed())
+  {
+    Serial.println("writeValue reached!");
+    mp3InfoServiceCharacteristic.writeValue(wert);
+  }
+  
+  if (DfMiniPlayerStateCharacteristic.subscribed())
+  {
+    dfMiniPlayerState.State.CurrentVolume = dfmp3.getVolume();
+    dfMiniPlayerState.State.CurrentTrack = dfmp3.getCurrentTrack();
+    dfMiniPlayerState.State.CurrentPlaybackMode = (uint8_t)dfmp3.getPlaybackMode();
+    dfMiniPlayerState.State.CurrentStatus = dfmp3.getStatus();
+    dfMiniPlayerState.State.CurrentEQ = (uint8_t)dfmp3.getEq();
+    DfMiniPlayerStateCharacteristic.writeValue( dfMiniPlayerState.bytes, sizeof dfMiniPlayerState.bytes );
+  }
+}
+
+//
+// Notification class for MP3 Mini Player module
+//
+class Mp3Notify
+{
+public:
+  static void PrintlnSourceAction(DfMp3_PlaySources source, const char* action)
+  {
+    if (source & DfMp3_PlaySources_Sd) 
+    {
+        Serial.print("SD Card, ");
+    }
+    if (source & DfMp3_PlaySources_Usb) 
+    {
+        Serial.print("USB Disk, ");
+    }
+    if (source & DfMp3_PlaySources_Flash) 
+    {
+        Serial.print("Flash, ");
+    }
+    Serial.println(action);
+  }
+  static void OnError([[maybe_unused]] DfMp3& mp3, uint16_t errorCode)
+  {
+    // see DfMp3_Error for code meaning
+    Serial.println();
+    Serial.print("Com Error ");
+    switch(errorCode)
+    {
+      case DfMp3_Error_Busy:
+        Serial.println(F("DfMp3_Error_Busy"));
+        break;
+      case DfMp3_Error_Sleeping:
+        Serial.println(F("DfMp3_Error_Sleeping"));
+        break;  
+      case DfMp3_Error_SerialWrongStack:
+        Serial.println(F("DfMp3_Error_SerialWrongStack"));
+        break;  
+      case DfMp3_Error_CheckSumNotMatch:
+        Serial.println(F("DfMp3_Error_CheckSumNotMatch"));
+        break;  
+      case DfMp3_Error_FileIndexOut:
+        Serial.println(F("DfMp3_Error_FileIndexOut"));
+        break;  
+      case DfMp3_Error_FileMismatch:
+        Serial.println(F("DfMp3_Error_FileMismatch"));
+        break;  
+      case DfMp3_Error_Advertise:
+        Serial.println(F("DfMp3_Error_Advertise"));
+        break;  
+      case DfMp3_Error_RxTimeout:
+        Serial.println(F("DfMp3_Error_RxTimeout"));
+        break;  
+      case DfMp3_Error_PacketSize:
+        Serial.println(F("DfMp3_Error_PacketSize"));
+        break;  
+      case DfMp3_Error_PacketHeader:
+        Serial.println(F("DfMp3_Error_PacketHeader"));
+        break;  
+      case DfMp3_Error_PacketChecksum:
+        Serial.println(F("DfMp3_Error_PacketChecksum"));
+        break;  
+      case DfMp3_Error_General:
+        Serial.println(F("DfMp3_Error_General"));
+        break;
+      default:
+        Serial.println(F("DfMp3_Error_default"));
+        break;
+    }
+    Serial.println(errorCode);
+  }
+  static void OnPlayFinished([[maybe_unused]] DfMp3& mp3, [[maybe_unused]] DfMp3_PlaySources source, uint16_t track)
+  {
+    publishMessage(0xFF);
+    Serial.print("Play finished for #");
+    Serial.println(track);  
+    
+    /*
+    
+    // start next track
+    track += 1;
+    // this example will just start back over with 1 after track 3
+    if (track > 3) 
+    {
+      track = 1;
+    }
+    dfmp3.playMp3FolderTrack(track);  // sd:/mp3/0001.mp3, sd:/mp3/0002.mp3, sd:/mp3/0003.mp3
+    
+    */
+  }
+  static void OnPlaySourceOnline([[maybe_unused]] DfMp3& mp3, DfMp3_PlaySources source)
+  {
+    PrintlnSourceAction(source, "online");
+  }
+  static void OnPlaySourceInserted([[maybe_unused]] DfMp3& mp3, DfMp3_PlaySources source)
+  {
+    PrintlnSourceAction(source, "inserted");
+  }
+  static void OnPlaySourceRemoved([[maybe_unused]] DfMp3& mp3, DfMp3_PlaySources source)
+  {
+    PrintlnSourceAction(source, "removed");
+  }
+};
+
+uint8_t STARTUP_VOLUME = 14;
+
+void SetupBLE(void)
+{
+  // begin initialization
+  if (!BLE.begin()) {
+    Serial.println("starting Bluetooth® Low Energy module failed!");
+
+    while (1);
+  }
+  
+  // set advertised local name and service UUID:
+  BLE.setLocalName("DF_MINI_MP3");
+
+  BLE.setAdvertisedService(mp3Service);
+
+  // add the characteristic to the service
+  mp3Service.addCharacteristic(mp3CommandCharacteristic);
+  mp3Service.addCharacteristic(mp3InfoServiceCharacteristic);
+  mp3Service.addCharacteristic(DfMiniPlayerStateCharacteristic);
+  
+  // add service
+  BLE.addService(mp3Service);
+  
+  // assign event handlers for connected, disconnected to peripheral
+  BLE.setEventHandler(BLEConnected, blePeripheralConnectHandler);
+  BLE.setEventHandler(BLEDisconnected, blePeripheralDisconnectHandler);
+
+  // assign event handlers for characteristic
+  mp3CommandCharacteristic.setEventHandler(BLEWritten, CharacteristicWritten);
+
+  mp3InfoServiceCharacteristic.setEventHandler(BLERead, CharacteristicRead);
+  mp3InfoServiceCharacteristic.setEventHandler(BLESubscribed, CharacteristicSubscribed);
+  mp3InfoServiceCharacteristic.setEventHandler(BLEUnsubscribed, CharacteristicUnsubscribed);
+
+  DfMiniPlayerStateCharacteristic.setEventHandler(BLESubscribed, CharacteristicSubscribed);
+  DfMiniPlayerStateCharacteristic.setEventHandler(BLEUnsubscribed, CharacteristicUnsubscribed);
+  
+  // set the initial value for the characteristic:
+  mp3CommandCharacteristic.writeValue(0x00);
+  mp3InfoServiceCharacteristic.writeValue(0x00);
+
+  dfMiniPlayerState.State.CurrentVolume = 0;
+  dfMiniPlayerState.State.CurrentTrack = 0;
+  dfMiniPlayerState.State.CurrentPlaybackMode = 0;
+  dfMiniPlayerState.State.CurrentStatus = 0;
+  dfMiniPlayerState.State.CurrentEQ = 0;
+  DfMiniPlayerStateCharacteristic.writeValue( dfMiniPlayerState.bytes, sizeof dfMiniPlayerState.bytes );
+    
+  // start advertising
+  BLE.advertise();
+
+  Serial.print("Local address is: ");
+  Serial.println(BLE.address());
+}
+
+
+
+void setup() 
+{
+  Serial.begin(115200);
+  
+  delay(500);
+  
+  Serial.println(F("Initializing..."));
+  
+  SetupBLE();
+  
+  dfmp3.begin();
+  waitMilliseconds(50);
+  dfmp3.disableDac();
+  waitMilliseconds(50);
+  dfmp3.reset();
+  waitMilliseconds(50);
+  dfmp3.setVolume(STARTUP_VOLUME);
+  waitMilliseconds(50);
+
+  if (dfmp3.isOnline())
+  {
+    Serial.println(F("DF Mini MP3 Player is online!"));
+  }
+
+}
+
+void waitMilliseconds(uint16_t msWait)
+{
+  uint32_t start = millis();
+  
+  while ((millis() - start) < msWait)
+  {
+    // if you have loops with delays, its important to 
+    // call dfmp3.loop() periodically so it allows for notifications 
+    // to be handled without interrupts
+    dfmp3.loop(); 
+    delay(1);
+  }
+}
+
+void PrintTotalTrackCount(void)
+{
+  uint16_t count = dfmp3.getTotalTrackCount(DfMp3_PlaySource_Sd);
+  Serial.print(F("Total Track Count: "));
+  Serial.println(count);  
+}
+
+void PrintCurrentPlaybackMode(void)
+{
+  DfMp3_PlaybackMode playbackMode = dfmp3.getPlaybackMode();
+  switch(playbackMode)
+  {
+    case DfMp3_PlaybackMode_Repeat:
+      Serial.println(F("PlaybackMode_Repeat"));
+      break;      
+    case DfMp3_PlaybackMode_FolderRepeat:
+      Serial.println(F("PlaybackMode_FolderRepeat"));
+      break;          
+    case DfMp3_PlaybackMode_SingleRepeat:
+      Serial.println(F("PlaybackMode_SingleRepeat"));
+      break;       
+    case DfMp3_PlaybackMode_Random:
+      Serial.println(F("PlaybackMode_Random"));
+      break;     
+  }
+}
+
+void PrintCurrentEQSetting(void)
+{
+  Serial.println("getEq:");
+  DfMp3_Eq eq = dfmp3.getEq();
+  switch(eq)
+  {
+    case DfMp3_Eq_Normal:
+      Serial.println(F("EQ_NORMAL"));
+      break;
+    case DfMp3_Eq_Pop:
+      Serial.println(F("EQ_POP"));
+      break;        
+    case DfMp3_Eq_Rock:
+      Serial.println(F("EQ_ROCK"));
+      break;        
+    case DfMp3_Eq_Jazz:
+      Serial.println(F("EQ_JAZZ"));
+      break;        
+    case DfMp3_Eq_Classic:
+      Serial.println(F("EQ_CLASSIC"));
+      break;        
+    case DfMp3_Eq_Bass:
+      Serial.println(F("EQ_BASS"));
+      break;
+    default:
+      Serial.println(F("EQ_NOT_DEFINED"));
+      break;
+  }
+}
+
+void ProcessCommand(int t)
+{
+  if (t == 1)
+  {
+    Serial.println(F("playGlobalTrack"));
+    dfmp3.playGlobalTrack(1);
+
+    publishMessage(0x03);
+    
+    return;
+  }
+  
+  if (t == 2)
+  {
+    
+    Serial.println(F("playFolderTrack"));
+    dfmp3.playFolderTrack(1, 1);
+    
+    publishMessage(0x0F);
+    
+    return;
+  }
+
+  if (t == 3)
+  {
+    Serial.println(F("nextTrack"));
+    dfmp3.nextTrack();
+    
+    publishMessage(0x01);
+    
+    return;
+  }
+
+  if (t == 4)
+  {
+    Serial.println(F("getCurrentTrack:"));
+    uint16_t currentTrack = dfmp3.getCurrentTrack();
+    Serial.println(currentTrack);
+
+    publishMessage(0x4C);
+    
+    return;
+  }
+
+  if (t == 5)
+  {
+    
+    PrintCurrentPlaybackMode();
+
+    publishMessage(0x45);
+    
+    return;
+  }
+  
+  if (t == 6)
+  {
+    
+    DfMp3_Eq eq = dfmp3.getEq();
+    switch(eq)
+    {
+      case DfMp3_Eq_Normal:
+        dfmp3.setEq(DfMp3_Eq_Pop);
+        break;
+      case DfMp3_Eq_Pop:
+        dfmp3.setEq(DfMp3_Eq_Rock);
+        break;        
+      case DfMp3_Eq_Rock:
+        dfmp3.setEq(DfMp3_Eq_Jazz);
+        break;        
+      case DfMp3_Eq_Jazz:
+        dfmp3.setEq(DfMp3_Eq_Classic);
+        break;        
+      case DfMp3_Eq_Classic:
+        dfmp3.setEq(DfMp3_Eq_Bass);
+        break;        
+      case DfMp3_Eq_Bass:
+        dfmp3.setEq(DfMp3_Eq_Normal);
+        break;
+      default:
+        dfmp3.setEq(DfMp3_Eq_Normal);
+        break;
+    }
+    
+    PrintCurrentEQSetting();
+
+    publishMessage(0x44);
+    
+    return;
+  }
+
+  if (t == 7)
+  {
+    uint8_t volume = dfmp3.getVolume();
+    
+    if (volume < 1)
+    {
+      Serial.println(F("Already at minimum volume"));
+    } else
+    {
+      Serial.println(F("Decrease volume by 1"));
+      dfmp3.setVolume(--volume);       
+    }
+    
+    publishMessage(0x43);
+    
+    return;
+  }
+  
+  if (t == 8)
+  {
+    uint8_t volume = dfmp3.getVolume();
+    if (volume < 30)
+    {
+      Serial.println(F("Increase volume by 1"));
+      dfmp3.setVolume(++volume);        
+    } else
+    {
+      Serial.println(F("Already at maximum volume"));
+    }
+    
+    publishMessage(0x43);
+    
+    return;
+  }
+
+  if (t == 9)
+  {
+    PrintTotalTrackCount();
+
+    publishMessage(0x48);
+    
+    return;
+  }
+
+  if (t == 10)
+  {
+    Serial.println(F("Pause playback"));
+    dfmp3.pause();
+
+    publishMessage(0x0E);
+    
+    return;
+  }
+
+  if (t == 11)
+  {
+    Serial.println(F("Stop playback"));
+    dfmp3.stop();
+    
+    publishMessage(0x16);
+    
+    return;
+  }
+
+  if (t == 12)
+  {
+    Serial.println(F("Start playback"));
+    dfmp3.start();
+    
+    publishMessage(0x0d);
+    
+    return;
+  }
+}
+
+void loop() 
+{
+  waitMilliseconds(1);
+  
+  if (Serial.available() > 0)
+  {
+    int t = Serial.parseInt();
+    if (t > 0)
+    {
+      ProcessCommand(t);
+      return;      
+    }
+  }
+
+  BLE.poll();
+}
+
+void blePeripheralConnectHandler(BLEDevice central) 
+{
+  // central connected event handler
+  Serial.print("Connected event, central: ");
+  Serial.println(central.address());
+}
+
+void blePeripheralDisconnectHandler(BLEDevice central) 
+{
+  // central disconnected event handler
+  Serial.print("Disconnected event, central: ");
+  Serial.println(central.address());
+}
+
+void CharacteristicSubscribed(BLEDevice central, BLECharacteristic characteristic) 
+{
+  Serial.print("Characteristic Subscribed Event, UUID: ");
+  Serial.println(characteristic.uuid());  
+}
+
+void CharacteristicUnsubscribed(BLEDevice central, BLECharacteristic characteristic) 
+{
+  Serial.print("Characteristic Unsubscribed Event, UUID: ");
+  Serial.println(characteristic.uuid());  
+}
+
+void CharacteristicRead(BLEDevice central, BLECharacteristic characteristic) 
+{
+  Serial.print(F("Characteristic Read Event, UUID: "));
+  Serial.println(characteristic.uuid());  
+}
+
+void CharacteristicWritten(BLEDevice central, BLECharacteristic characteristic) 
+{
+  // central wrote new value to characteristic, update LED
+  Serial.print(F("Characteristic Written Event, UUID: "));
+  Serial.println(characteristic.uuid());
+  if (characteristic.uuid() == mp3CommandCharacteristic.uuid())
+  {
+    int BLE_T = (int)mp3CommandCharacteristic.value();
+    ProcessCommand(BLE_T);    
+    return;
+  }
+}
