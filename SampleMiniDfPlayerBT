@@ -1,6 +1,6 @@
 #include <DFMiniMp3.h>
 #include <ArduinoBLE.h>
-
+#include "MP3_BLE_Commands.h"
 
 BLEService mp3Service("{741B8C05-2908-40F8-BA78-B245AC40FF40}"); 
 
@@ -28,6 +28,7 @@ BLECharacteristic DfMiniPlayerStateCharacteristic( "{741B8C05-2908-40F8-BA78-B24
 
 BLEByteCharacteristic mp3CommandCharacteristic("{741B8C05-2908-40F8-BA78-B245AC40FF41}", BLEWrite);
 BLEByteCharacteristic mp3InfoServiceCharacteristic("{741B8C05-2908-40F8-BA78-B245AC40FF42}", BLERead | BLENotify);
+BLEByteCharacteristic mp3ErrorServiceCharacteristic("{741B8C05-2908-40F8-BA78-B245AC40FF43}", BLERead | BLENotify);
 
 class Mp3Notify; 
 
@@ -36,6 +37,20 @@ typedef DFMiniMp3<HardwareSerial, Mp3Notify> DfMp3;
 
 // Instance a DfMp3 object
 DfMp3 dfmp3(Serial1);
+
+void publishError(byte ErrorCode)
+{
+  if (!BLE.connected())
+  {
+    Serial.println("PublishError - BLE not connected");
+    return;
+  }
+
+  if (mp3ErrorServiceCharacteristic.subscribed())
+  {
+    mp3ErrorServiceCharacteristic.writeValue(ErrorCode);
+  }
+}
 
 void publishMessage(byte wert)
 {  
@@ -86,9 +101,8 @@ public:
   }
   static void OnError([[maybe_unused]] DfMp3& mp3, uint16_t errorCode)
   {
-    // see DfMp3_Error for code meaning
-    Serial.println();
-    Serial.print("Com Error ");
+    publishError((errorCode & 0xFF));
+    
     switch(errorCode)
     {
       case DfMp3_Error_Busy:
@@ -135,22 +149,9 @@ public:
   }
   static void OnPlayFinished([[maybe_unused]] DfMp3& mp3, [[maybe_unused]] DfMp3_PlaySources source, uint16_t track)
   {
-    publishMessage(0xFF);
+    publishMessage(0x00);
     Serial.print("Play finished for #");
     Serial.println(track);  
-    
-    /*
-    
-    // start next track
-    track += 1;
-    // this example will just start back over with 1 after track 3
-    if (track > 3) 
-    {
-      track = 1;
-    }
-    dfmp3.playMp3FolderTrack(track);  // sd:/mp3/0001.mp3, sd:/mp3/0002.mp3, sd:/mp3/0003.mp3
-    
-    */
   }
   static void OnPlaySourceOnline([[maybe_unused]] DfMp3& mp3, DfMp3_PlaySources source)
   {
@@ -185,6 +186,7 @@ void SetupBLE(void)
   // add the characteristic to the service
   mp3Service.addCharacteristic(mp3CommandCharacteristic);
   mp3Service.addCharacteristic(mp3InfoServiceCharacteristic);
+  mp3Service.addCharacteristic(mp3ErrorServiceCharacteristic);
   mp3Service.addCharacteristic(DfMiniPlayerStateCharacteristic);
   
   // add service
@@ -201,12 +203,16 @@ void SetupBLE(void)
   mp3InfoServiceCharacteristic.setEventHandler(BLESubscribed, CharacteristicSubscribed);
   mp3InfoServiceCharacteristic.setEventHandler(BLEUnsubscribed, CharacteristicUnsubscribed);
 
+  mp3ErrorServiceCharacteristic.setEventHandler(BLESubscribed, CharacteristicSubscribed);
+  mp3ErrorServiceCharacteristic.setEventHandler(BLEUnsubscribed, CharacteristicUnsubscribed);
+  
   DfMiniPlayerStateCharacteristic.setEventHandler(BLESubscribed, CharacteristicSubscribed);
   DfMiniPlayerStateCharacteristic.setEventHandler(BLEUnsubscribed, CharacteristicUnsubscribed);
   
   // set the initial value for the characteristic:
   mp3CommandCharacteristic.writeValue(0x00);
   mp3InfoServiceCharacteristic.writeValue(0x00);
+  mp3ErrorServiceCharacteristic.writeValue(0x00);
 
   dfMiniPlayerState.State.CurrentVolume = 0;
   dfMiniPlayerState.State.CurrentTrack = 0;
@@ -221,8 +227,6 @@ void SetupBLE(void)
   Serial.print("Local address is: ");
   Serial.println(BLE.address());
 }
-
-
 
 void setup() 
 {
@@ -269,6 +273,7 @@ void PrintTotalTrackCount(void)
   uint16_t count = dfmp3.getTotalTrackCount(DfMp3_PlaySource_Sd);
   Serial.print(F("Total Track Count: "));
   Serial.println(count);  
+  publishMessage(0x48);
 }
 
 void PrintCurrentPlaybackMode(void)
@@ -289,6 +294,8 @@ void PrintCurrentPlaybackMode(void)
       Serial.println(F("PlaybackMode_Random"));
       break;     
   }
+
+  publishMessage(0x45);
 }
 
 void PrintCurrentEQSetting(void)
@@ -321,168 +328,184 @@ void PrintCurrentEQSetting(void)
   }
 }
 
-void ProcessCommand(int t)
+void PlayGlobalTrack(void)
 {
-  if (t == 1)
-  {
-    Serial.println(F("playGlobalTrack"));
-    dfmp3.playGlobalTrack(1);
+  Serial.println(F("playGlobalTrack"));
+  dfmp3.playGlobalTrack(1);
 
-    publishMessage(0x03);
-    
-    return;
-  }
+  publishMessage(0x03);  
+}
+
+void PlayFolderTrack(void)
+{
+  Serial.println(F("playFolderTrack"));
+  dfmp3.playFolderTrack(1, 1);
   
-  if (t == 2)
-  {
-    
-    Serial.println(F("playFolderTrack"));
-    dfmp3.playFolderTrack(1, 1);
-    
-    publishMessage(0x0F);
-    
-    return;
-  }
+  publishMessage(0x0F);  
+}
 
-  if (t == 3)
-  {
-    Serial.println(F("nextTrack"));
-    dfmp3.nextTrack();
-    
-    publishMessage(0x01);
-    
-    return;
-  }
+void PlayNextTrack(void)
+{
+  Serial.println(F("Next Track Command"));
+  dfmp3.nextTrack();
+  
+  publishMessage(0x01);
+}
 
-  if (t == 4)
-  {
+void PlayPreviousTrack(void)
+{
+  Serial.println(F("Previous Track Command"));
+  dfmp3.prevTrack();
+  
+  publishMessage(0x02);
+}
+
+void GetCurrentTrack(void)
+{
     Serial.println(F("getCurrentTrack:"));
     uint16_t currentTrack = dfmp3.getCurrentTrack();
     Serial.println(currentTrack);
 
     publishMessage(0x4C);
-    
-    return;
-  }
+}
 
-  if (t == 5)
+void SetNextEq(void)
+{
+  DfMp3_Eq eq = dfmp3.getEq();
+  switch(eq)
   {
-    
-    PrintCurrentPlaybackMode();
-
-    publishMessage(0x45);
-    
-    return;
-  }
-  
-  if (t == 6)
-  {
-    
-    DfMp3_Eq eq = dfmp3.getEq();
-    switch(eq)
-    {
-      case DfMp3_Eq_Normal:
-        dfmp3.setEq(DfMp3_Eq_Pop);
-        break;
-      case DfMp3_Eq_Pop:
-        dfmp3.setEq(DfMp3_Eq_Rock);
-        break;        
-      case DfMp3_Eq_Rock:
-        dfmp3.setEq(DfMp3_Eq_Jazz);
-        break;        
-      case DfMp3_Eq_Jazz:
-        dfmp3.setEq(DfMp3_Eq_Classic);
-        break;        
-      case DfMp3_Eq_Classic:
-        dfmp3.setEq(DfMp3_Eq_Bass);
-        break;        
-      case DfMp3_Eq_Bass:
-        dfmp3.setEq(DfMp3_Eq_Normal);
-        break;
-      default:
-        dfmp3.setEq(DfMp3_Eq_Normal);
-        break;
-    }
-    
-    PrintCurrentEQSetting();
-
-    publishMessage(0x44);
-    
-    return;
-  }
-
-  if (t == 7)
-  {
-    uint8_t volume = dfmp3.getVolume();
-    
-    if (volume < 1)
-    {
-      Serial.println(F("Already at minimum volume"));
-    } else
-    {
-      Serial.println(F("Decrease volume by 1"));
-      dfmp3.setVolume(--volume);       
-    }
-    
-    publishMessage(0x43);
-    
-    return;
+    case DfMp3_Eq_Normal:
+      dfmp3.setEq(DfMp3_Eq_Pop);
+      break;
+    case DfMp3_Eq_Pop:
+      dfmp3.setEq(DfMp3_Eq_Rock);
+      break;        
+    case DfMp3_Eq_Rock:
+      dfmp3.setEq(DfMp3_Eq_Jazz);
+      break;        
+    case DfMp3_Eq_Jazz:
+      dfmp3.setEq(DfMp3_Eq_Classic);
+      break;        
+    case DfMp3_Eq_Classic:
+      dfmp3.setEq(DfMp3_Eq_Bass);
+      break;        
+    case DfMp3_Eq_Bass:
+      dfmp3.setEq(DfMp3_Eq_Normal);
+      break;
+    default:
+      dfmp3.setEq(DfMp3_Eq_Normal);
+      break;
   }
   
-  if (t == 8)
+  PrintCurrentEQSetting();
+
+  publishMessage(0x44);
+}
+
+void VolumeStepDown(void)
+{
+  uint8_t volume = dfmp3.getVolume();
+  
+  if (volume < 1)
   {
-    uint8_t volume = dfmp3.getVolume();
-    if (volume < 30)
-    {
-      Serial.println(F("Increase volume by 1"));
-      dfmp3.setVolume(++volume);        
-    } else
-    {
-      Serial.println(F("Already at maximum volume"));
-    }
-    
-    publishMessage(0x43);
-    
-    return;
+    Serial.println(F("Already at minimum volume"));
+  } else
+  {
+    Serial.println(F("Decrease volume by 1"));
+    dfmp3.setVolume(--volume);       
   }
+  
+  publishMessage(0x43);
+}
 
-  if (t == 9)
+void VolumeStepUp(void)
+{
+  uint8_t volume = dfmp3.getVolume();
+  if (volume < 30)
   {
-    PrintTotalTrackCount();
-
-    publishMessage(0x48);
-    
-    return;
+    Serial.println(F("Increase volume by 1"));
+    dfmp3.setVolume(++volume);        
+  } else
+  {
+    Serial.println(F("Already at maximum volume"));
   }
+  
+  publishMessage(0x43);
+}
 
-  if (t == 10)
+void PausePlayback(void)
+{
+  Serial.println(F("Pause playback"));
+  dfmp3.pause();
+
+  publishMessage(0x0E);
+}
+
+void StopPlayback(void)
+{
+  Serial.println(F("Stop playback"));
+  dfmp3.stop();
+  
+  publishMessage(0x16);
+}
+
+void StartPlayback(void)
+{
+  Serial.println(F("Start playback"));
+  dfmp3.start();
+  
+  publishMessage(0x0d);
+}
+
+void ProcessCommand(int CommandId)
+{
+  switch(CommandId)
   {
-    Serial.println(F("Pause playback"));
-    dfmp3.pause();
-
-    publishMessage(0x0E);
-    
-    return;
-  }
-
-  if (t == 11)
-  {
-    Serial.println(F("Stop playback"));
-    dfmp3.stop();
-    
-    publishMessage(0x16);
-    
-    return;
-  }
-
-  if (t == 12)
-  {
-    Serial.println(F("Start playback"));
-    dfmp3.start();
-    
-    publishMessage(0x0d);
-    
-    return;
+    case MP3_CMD_PLAY_GLOBAL_TRACK:
+      PlayGlobalTrack();
+      break;
+    case MP3_CMD_PLAY_FOLDER_TRACK:
+      PlayFolderTrack();
+      break;
+    case MP3_CMD_PLAY_NEXT_TRACK:
+      PlayNextTrack();
+      break;
+    case MP3_CMD_PLAY_PREVIOUS_TRACK:
+      PlayPreviousTrack();
+      break;
+    case MP3_CMD_GET_CURRENT_TRACK:
+      GetCurrentTrack();
+      break;
+    case MP3_CMD_GET_CURRENT_PLAYBACK_MODE:
+      PrintCurrentPlaybackMode();
+      break;
+    case MP3_CMD_SET_NEXT_EQ:
+      SetNextEq();
+      break;
+    case MP3_CMD_VOLUME_ONE_STEP_DOWN:
+      VolumeStepDown();
+      break;
+    case MP3_CMD_VOLUME_ONE_STEP_UP:
+      VolumeStepUp();
+      break;
+    case MP3_CMD_GET_ALL_TRACK_COUNT:
+      PrintTotalTrackCount();
+      break;
+    case MP3_CMD_PAUSE_PLAY:
+      PausePlayback();
+      break;
+    case MP3_CMD_STOP_PLAY:
+      StopPlayback();
+      break;
+    case MP3_CMD_START_PLAY:
+      StartPlayback();
+      break;
+    default:
+      publishMessage(0x00);
+      Serial.print("CommandId ");
+      Serial.print(CommandId);
+      Serial.println(" is not implemented yet.");
+      break;
   }
 }
 
