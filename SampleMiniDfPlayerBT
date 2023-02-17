@@ -515,12 +515,16 @@ void loop()
   
   if (Serial.available() > 0)
   {
-    int t = Serial.parseInt();
-    if (t > 0)
+    int SERIAL_CMD_ID = Serial.parseInt();
+    if (SERIAL_CMD_ID > 0)
     {
-      ProcessCommand(t);
+      ProcessCommand(SERIAL_CMD_ID);
       return;      
+    } else
+    {
+      Serial.println("CommandId cannot be negative!");
     }
+    Serial.flush();
   }
 
   BLE.poll();
@@ -565,8 +569,8 @@ void CharacteristicWritten(BLEDevice central, BLECharacteristic characteristic)
   Serial.println(characteristic.uuid());
   if (characteristic.uuid() == mp3CommandCharacteristic.uuid())
   {
-    int BLE_T = (int)mp3CommandCharacteristic.value();
-    ProcessCommand(BLE_T);    
+    int BLE_CMD_ID = (int)mp3CommandCharacteristic.value();
+    ProcessCommand(BLE_CMD_ID);    
     return;
   }
 }
