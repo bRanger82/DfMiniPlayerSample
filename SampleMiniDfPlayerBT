@@ -5,7 +5,7 @@
 BLEService mp3Service("{741B8C05-2908-40F8-BA78-B245AC40FF40}"); 
 
 
-#define DF_MINI_PLAYER_STATE_DATA_SIZE 7
+#define DF_MINI_PLAYER_STATE_DATA_SIZE 8
 
 typedef struct __attribute__( ( packed ) )
 {
@@ -14,6 +14,7 @@ typedef struct __attribute__( ( packed ) )
   uint8_t CurrentPlaybackMode;
   uint16_t CurrentStatus;
   uint8_t CurrentEQ;
+  uint8_t ErrorCode;
 } df_mini_player_state_t;
 
 typedef union
@@ -52,7 +53,7 @@ void publishError(byte ErrorCode)
   }
 }
 
-void publishMessage(byte MessageId)
+void publishMessage(byte MessageId, byte ErrorCode = 0)
 {  
   if (!BLE.connected())
   {
@@ -71,10 +72,16 @@ void publishMessage(byte MessageId)
     dfMiniPlayerState.State.CurrentPlaybackMode = 0;
     dfMiniPlayerState.State.CurrentStatus = 0;
     dfMiniPlayerState.State.CurrentEQ = 0;
+    dfMiniPlayerState.State.ErrorCode = 0xFF;
     
     DfMiniPlayerStateCharacteristic.writeValue( dfMiniPlayerState.bytes, sizeof dfMiniPlayerState.bytes );
     
     return;
+  }
+
+  if (ErrorCode != 0x00)
+  {
+    publishError(ErrorCode);
   }
   
   if (mp3InfoServiceCharacteristic.subscribed())
@@ -90,6 +97,7 @@ void publishMessage(byte MessageId)
     dfMiniPlayerState.State.CurrentPlaybackMode = (uint8_t)dfmp3.getPlaybackMode();
     dfMiniPlayerState.State.CurrentStatus = dfmp3.getStatus();
     dfMiniPlayerState.State.CurrentEQ = (uint8_t)dfmp3.getEq();
+    dfMiniPlayerState.State.ErrorCode = ErrorCode;
     DfMiniPlayerStateCharacteristic.writeValue( dfMiniPlayerState.bytes, sizeof dfMiniPlayerState.bytes );
   }
 }
@@ -236,6 +244,8 @@ void SetupBLE(void)
   dfMiniPlayerState.State.CurrentPlaybackMode = 0;
   dfMiniPlayerState.State.CurrentStatus = 0;
   dfMiniPlayerState.State.CurrentEQ = 0;
+  dfMiniPlayerState.State.ErrorCode = 0;
+  
   DfMiniPlayerStateCharacteristic.writeValue( dfMiniPlayerState.bytes, sizeof dfMiniPlayerState.bytes );
     
   // start advertising
@@ -525,7 +535,7 @@ void ProcessCommand(int CommandId)
       StartPlayback();
       break;
     default:
-      publishMessage(0x00);
+      publishMessage(0x00, 0xFE);
       Serial.print("CommandId ");
       Serial.print(CommandId);
       Serial.println(" is not implemented yet.");
