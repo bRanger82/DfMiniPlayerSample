@@ -25,7 +25,7 @@ typedef union
 
 df_mini_player_state_ut dfMiniPlayerState;
 
-BLECharacteristic DfMiniPlayerStateCharacteristic( "{741B8C05-2908-40F8-BA78-B245AC40FF43}", BLERead | BLENotify, sizeof dfMiniPlayerState.bytes );
+BLECharacteristic DfMiniPlayerStateCharacteristic( "{741B8C05-2908-40F8-BA78-B245AC40FF44}", BLERead | BLENotify, sizeof dfMiniPlayerState.bytes );
 
 BLEByteCharacteristic mp3CommandCharacteristic("{741B8C05-2908-40F8-BA78-B245AC40FF41}", BLEWrite);
 BLEByteCharacteristic mp3InfoServiceCharacteristic("{741B8C05-2908-40F8-BA78-B245AC40FF42}", BLERead | BLENotify);
@@ -550,12 +550,17 @@ void loop()
   if (Serial.available() > 0)
   {
     int SERIAL_CMD_ID = Serial.parseInt();
-    if (SERIAL_CMD_ID > 0)
+    if (SERIAL_CMD_ID == 0)
+    {
+      // do nothing, as empty char is received.
+    } else if (SERIAL_CMD_ID > 0)
     {
       ProcessCommand(SERIAL_CMD_ID);
       return;      
     } else
     {
+      Serial.print("Received: ");
+      Serial.println(SERIAL_CMD_ID);
       Serial.println("CommandId cannot be negative!");
     }
     Serial.flush();
